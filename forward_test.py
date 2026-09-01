@@ -33,7 +33,7 @@ with open('model3_rf.pkl', 'rb') as f:
 
 FEATURES = [
     's1_roe_trend', 's2_revenue_cagr', 's3_fcf', 's4_pli_tailwind',
-    's5_promoter_trend', 's6_earnings_consist', 's8_peg_ratio',
+    's5_promoter_trend', 's6_earnings_consist', 's7_tam_expansion', 's8_peg_ratio',
     's9_dii_accumulation', 's10_de_improvement', 's11_roce',
     's12_eps_cagr', 's14_macro_cycle', 's15_rs_12m'
 ]
@@ -73,7 +73,12 @@ for rebal_date in rebal_dates:
     before = len(period_df)
     period_df = period_df[~period_df['symbol'].isin(excluded)]
 
-    # Top 10 high-conviction picks
+   # Remove stocks with both ROCE and D/E missing (likely misscored due to nulls)
+    period_df = period_df[~(
+        period_df['s11_roce'].isna() & 
+        period_df['s10_de_improvement'].isna()
+    )]   
+ # Top 10 high-conviction picks
     top10 = period_df.nlargest(10, 'score')
 
     # Calculate actual returns

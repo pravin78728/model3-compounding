@@ -23,6 +23,7 @@ CREATE TABLE model3_training_data (
     s2_revenue_cagr     NUMERIC,
     s3_fcf              NUMERIC,
     s4_pli_tailwind     NUMERIC,
+s7_tam_expansion    NUMERIC,
     s5_promoter_trend   NUMERIC,
     s6_earnings_consist NUMERIC,
     s8_peg_ratio        NUMERIC,
@@ -117,6 +118,10 @@ print(f"  ✓ institutional_holdings: {len(institutional)} symbols")
 # pli_beneficiaries
 cur.execute("SELECT symbol FROM pli_beneficiaries WHERE active = TRUE")
 pli_symbols = set(row[0] for row in cur.fetchall())
+# TAM expansion (S7)
+cur.execute("SELECT symbol, s7_score FROM tam_expansion")
+tam_scores = {row[0]: float(row[1]) for row in cur.fetchall()}
+print(f"  ✓ tam_expansion: {len(tam_scores)} symbols")
 print(f"  ✓ pli_beneficiaries: {len(pli_symbols)} symbols")
 
 # macro_indicators — long format, filter by indicator name
@@ -196,7 +201,9 @@ def s3_fcf(symbol, rebal_date):
 
 def s4_pli(symbol):
     return 80.0 if symbol in pli_symbols else None
-
+def s7_tam(symbol):
+    score = tam_scores.get(symbol, 0.0)
+    return score if score > 0 else None
 def s5_promoter_trend(symbol, rebal_date):
     rows = sorted([r for r in promoter.get(symbol, [])
                    if r['qend'] <= rebal_date],
@@ -317,6 +324,7 @@ for rebal_date in rebalance_dates:
                 s2_revenue_cagr(symbol, rebal_date),
                 s3_fcf(symbol, rebal_date),
                 s4_pli(symbol),
+s7_tam(symbol),
                 s5_promoter_trend(symbol, rebal_date),
                 s6_earnings_consistency(symbol, rebal_date),
                 s8_peg(symbol, rebal_date),
@@ -340,7 +348,7 @@ for rebal_date in rebalance_dates:
             INSERT INTO model3_training_data (
                 symbol, rebalance_date,
                 s1_roe_trend, s2_revenue_cagr, s3_fcf, s4_pli_tailwind,
-                s5_promoter_trend, s6_earnings_consist, s8_peg_ratio,
+               s7_tam_expansion, s5_promoter_trend, s6_earnings_consist, s8_peg_ratio,
                 s9_dii_accumulation, s10_de_improvement, s11_roce,
                 s12_eps_cagr, s14_macro_cycle, s15_rs_12m,
                 composite_score, forward_6m_return,
