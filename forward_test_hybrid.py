@@ -112,9 +112,9 @@ def passes_screen1(symbol, rebal_date):
     if (f0['net_profit']-f1['net_profit'])/f1['net_profit']*100 <= 1: return False
 
     if not f3 or not f3['sales'] or f3['sales'] <= 0: return False
-    if ((f0['sales']/f3['sales'])**(1/3)-1)*100 <= 20: return False
+    if ((f0['sales']/f3['sales'])**(1/3)-1)*100 <= 15: return False
     if not f3['net_profit'] or f3['net_profit'] <= 0: return False
-    if ((f0['net_profit']/f3['net_profit'])**(1/3)-1)*100 <= 25: return False
+    if ((f0['net_profit']/f3['net_profit'])**(1/3)-1)*100 <= 20: return False
 
     prom = get_promoter_pct(symbol, rebal_date)
     if not prom or prom <= 25: return False
