@@ -34,7 +34,7 @@ FEATURES = [
     's1_roe_trend', 's2_revenue_cagr', 's3_fcf', 's4_pli_tailwind',
     's5_promoter_trend', 's6_earnings_consist', 's7_tam_expansion',
     's8_peg_ratio', 's9_dii_accumulation', 's10_de_improvement',
-    's11_roce', 's12_eps_cagr', 's14_macro_cycle', 's15_rs_12m'
+    's11_roce', 's12_eps_cagr', 's14_macro_cycle', 's15_rs_12m', 's_fii_trend', 's_dii_trend'
 ]
 TARGET = 'forward_6m_return'
 

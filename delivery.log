@@ -1,0 +1,10 @@
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+No delivery data for 2026-09-04 (status 404)
+Fetched delivery data for 2026-09-03: 2632 stocks
+Updated 2632 rows for 2026-09-03
+Fetched delivery data for 2026-09-02: 2646 stocks
+Updated 2646 rows for 2026-09-02
+Fetched delivery data for 2026-09-01: 2646 stocks
+Updated 500 rows for 2026-09-01
+Done.

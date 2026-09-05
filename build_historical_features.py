@@ -33,6 +33,8 @@ s7_tam_expansion    NUMERIC,
     s12_eps_cagr        NUMERIC,
     s14_macro_cycle     NUMERIC,
     s15_rs_12m          NUMERIC,
+    s_fii_trend         NUMERIC,
+    s_dii_trend         NUMERIC,
     composite_score     NUMERIC,
     forward_6m_return   NUMERIC,
     in_train            BOOLEAN,
@@ -109,10 +111,10 @@ for symbol, qend, pct in cur.fetchall():
 print(f"  ✓ promoter_holdings: {len(promoter)} symbols")
 
 # institutional_holdings — date column is period, DII column is dii_pct
-cur.execute("SELECT symbol, period, dii_pct FROM institutional_holdings WHERE dii_pct IS NOT NULL")
+cur.execute("SELECT symbol, period, fii_pct, dii_pct FROM institutional_holdings WHERE fii_pct IS NOT NULL OR dii_pct IS NOT NULL")
 institutional = {}
-for symbol, period, pct in cur.fetchall():
-    institutional.setdefault(symbol, []).append({'period': period, 'pct': float(pct)})
+for symbol, period, fii, dii in cur.fetchall():
+    institutional.setdefault(symbol, []).append({'period': period, 'fii': float(fii) if fii else None, 'dii': float(dii) if dii else None})
 print(f"  ✓ institutional_holdings: {len(institutional)} symbols")
 
 # pli_beneficiaries
@@ -210,6 +212,7 @@ def s5_promoter_trend(symbol, rebal_date):
                   key=lambda x: x['qend'], reverse=True)[:4]
     if len(rows) < 2: return None
     vals = [r['pct'] for r in rows]
+    if len(vals) < 2: return None
     return round(min(100, max(0, 50 + (vals[0]-vals[-1]) * 10)), 2)
 
 def s6_earnings_consistency(symbol, rebal_date):
@@ -248,8 +251,26 @@ def s9_dii_accumulation(symbol, rebal_date):
                    if r['period'] <= rebal_date],
                   key=lambda x: x['period'], reverse=True)[:4]
     if len(rows) < 2: return None
-    vals = [r['pct'] for r in rows]
+    vals = [r['dii'] for r in rows if r['dii'] is not None]
+    if len(vals) < 2: return None
     return round(min(100, max(0, 50 + (vals[0]-vals[-1]) * 5)), 2)
+
+def s_fii_trend(symbol, rebal_date):
+    rows = sorted([r for r in institutional.get(symbol, [])
+                   if r['period'] <= rebal_date and r['fii'] is not None],
+                  key=lambda x: x['period'], reverse=True)[:4]
+    if len(rows) < 2: return None
+    vals = [r['fii'] for r in rows]
+    if len(vals) < 2: return None
+    return round(min(100, max(0, 50 + (vals[0]-vals[-1]) * 10)), 2)
+
+def s_dii_trend(symbol, rebal_date):
+    rows = sorted([r for r in institutional.get(symbol, [])
+                   if r['period'] <= rebal_date and r['dii'] is not None],
+                  key=lambda x: x['period'], reverse=True)[:4]
+    if len(rows) < 2: return None
+    vals = [r['dii'] for r in rows]
+    return round(min(100, max(0, 50 + (vals[0]-vals[-1]) * 10)), 2)
 
 def s10_de_improvement(symbol, rebal_date):
     rows = sorted([r for r in financials.get(symbol, [])
@@ -324,7 +345,7 @@ for rebal_date in rebalance_dates:
                 s2_revenue_cagr(symbol, rebal_date),
                 s3_fcf(symbol, rebal_date),
                 s4_pli(symbol),
-s7_tam(symbol),
+                s7_tam(symbol),
                 s5_promoter_trend(symbol, rebal_date),
                 s6_earnings_consistency(symbol, rebal_date),
                 s8_peg(symbol, rebal_date),
@@ -334,13 +355,17 @@ s7_tam(symbol),
                 s12_eps_cagr(symbol, rebal_date),
                 s14,
                 s15_rs_12m(symbol, rebal_date),
+                s_fii_trend(symbol, rebal_date),
+                s_dii_trend(symbol, rebal_date),
             ]
             fwd = forward_return(symbol, rebal_date)
             available = [x for x in sig if x is not None]
             composite = round(sum(available)/len(available), 2) if available else None
             batch.append((symbol, rebal_date, *sig, composite, fwd,
                           in_train, in_validate, in_fwd))
-        except Exception:
+        except Exception as e:
+            if rebal_date.year >= 2022:
+                print(f"ERR {symbol}: {e}")
             pass
 
     if batch:
@@ -351,6 +376,7 @@ s7_tam(symbol),
                s7_tam_expansion, s5_promoter_trend, s6_earnings_consist, s8_peg_ratio,
                 s9_dii_accumulation, s10_de_improvement, s11_roce,
                 s12_eps_cagr, s14_macro_cycle, s15_rs_12m,
+                s_fii_trend, s_dii_trend,
                 composite_score, forward_6m_return,
                 in_train, in_validate, in_forward_test
             ) VALUES %s

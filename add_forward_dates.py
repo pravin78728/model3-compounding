@@ -19,6 +19,7 @@ rebalance_dates = [
     date(2025, 6, 1),
     date(2025, 12, 1),
     date(2026, 6, 1),
+    date(2026, 12, 1),
 ]
 print(f"Adding {len(rebalance_dates)} rebalance dates: {rebalance_dates}")
 
