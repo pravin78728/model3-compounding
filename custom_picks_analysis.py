@@ -15,11 +15,9 @@ load_dotenv()
 
 # Custom stock list - normalize to uppercase
 CUSTOM_STOCKS = [
-    'ECLERX', '360ONE', 'ANANDRATHI', 'AIIL', 'APARINDS',
-    'AUBANK', 'AVANTIFEED', 'BAJFINANCE', 'BAJAJHFL', 'BEL',
-    'BSE', 'CAPLIPOINT', 'ETERNAL', 'EICHERMOT', 'HAL',
-    'INDHOTEL', 'M&M', 'NH', 'PNGJL', 'PERSISTENT',
-    'PHOENIXLTD', 'STYLAMIND', 'TRENT', 'VBL', 'WAAREEENER'
+    'ABB', 'DIXON', 'DLF', 'GANESHHOU', 'GMBREW', 'GRSE', 'INDRAMEDCO',
+    'INDUSINDBK', 'IRCTC', 'JIOFIN', 'KAYNES', 'KRN', 'MAZDOCK',
+    'NATCOPHARM', 'PRESTIGE', 'UNIECOM'
 ]
 
 conn = psycopg2.connect(os.environ['DATABASE_URL'])
