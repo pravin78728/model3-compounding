@@ -120,7 +120,8 @@ def passes_screen1(symbol, rebal_date):
     f1 = get_fin(symbol, yr-1)
     f3 = get_fin(symbol, yr-3)
     if not f0['roe'] or f0['roe'] <= 20: return False
-    if not f0['opm'] or f0['opm'] <= 10: return False
+    if symbol not in financial_symbols:
+        if not f0['opm'] or f0['opm'] <= 10: return False
     if symbol not in financial_symbols:
         if f0['de'] is None or f0['de'] >= 0.9: return False
         if not f0['roce'] or f0['roce'] <= 20: return False
