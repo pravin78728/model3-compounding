@@ -56,3 +56,38 @@ conn.close()
 
 print(f"Done. New rows inserted: {inserted}")
 print(f"Run completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+# Also update NIFTY500_IDX
+try:
+    from nse import NSE
+    from datetime import timedelta
+    nse = NSE('/tmp')
+    # Get last date in DB for NIFTY500_IDX
+    conn2 = psycopg2.connect(os.getenv('DATABASE_URL'))
+    cur2 = conn2.cursor()
+    cur2.execute("SELECT MAX(date) FROM prices WHERE symbol='NIFTY500_IDX'")
+    last_idx_date = cur2.fetchone()[0]
+    from_date = last_idx_date + timedelta(days=1) if last_idx_date else datetime(2024,1,1).date()
+    to_date = datetime.now().date()
+    if from_date <= to_date:
+        idx_data = nse.fetch_historical_index_data('NIFTY 500',
+            datetime.combine(from_date, datetime.min.time()),
+            datetime.combine(to_date, datetime.min.time()))
+        idx_rows = []
+        for row in idx_data:
+            try:
+                dt = datetime.strptime(row['EOD_TIMESTAMP'], '%d-%b-%Y').date()
+                close = float(row['EOD_CLOSE_INDEX_VAL'])
+                idx_rows.append(('NIFTY500_IDX', dt, close))
+            except: pass
+        if idx_rows:
+            execute_values(cur2, """
+                INSERT INTO prices (symbol, date, close_price)
+                VALUES %s ON CONFLICT (symbol, date) DO NOTHING
+            """, idx_rows)
+            conn2.commit()
+            print(f"NIFTY500_IDX: {len(idx_rows)} rows added")
+    cur2.close()
+    conn2.close()
+except Exception as e:
+    print(f"NIFTY500_IDX update failed: {e}")
