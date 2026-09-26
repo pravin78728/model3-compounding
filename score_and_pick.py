@@ -208,7 +208,7 @@ for rank, (_, row) in enumerate(picks.iterrows(), 1):
     price_str = f"Rs.{row['price']:.0f}" if row['price'] else 'N/A'
     eps_str = f"{row['eps_cagr_3y']:.0f}%" if row['eps_cagr_3y'] else 'N/A'
     marker = ' ◄ DEPLOY' if rank <= (10 if regime=='BULL' else 3) else ''
-    print(f"  {rank:<5} {row['symbol']:<14} {row['final_score']:>7.1f} {str(row['roe']):>6} {str(row['roce']) if row['roce'] else 'N/A':>7} {eps_str:>8} {row['profit_1y']:>10.1f}% {price_str:>10} {row['inst_label']}{marker}")
+    print(f"  {rank:<5} {row['symbol']:<14} {row['final_score']:>7.1f} {str(row['roe']):>6} {str(row['roce']) if row['roce'] else 'N/A':>7} {eps_str:>8} {row['profit_1y']:>10.1f}% {price_str:>10} {row['inst_score']:>6} {row['inst_label']}{marker}")
 
 print(f"\n  Scoring: ROCE 25% + EPS CAGR 25% + Rev CAGR 20% + ROE 10% + FCF 10% + OPM 5% + D/E 5%")
 print(f"  Inst conviction: 30% weight on final score")
