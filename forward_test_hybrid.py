@@ -64,7 +64,7 @@ FEATURES = [
     's1_roe_trend', 's2_revenue_cagr', 's3_fcf', 's4_pli_tailwind',
     's5_promoter_trend', 's6_earnings_consist', 's7_tam_expansion',
     's8_peg_ratio', 's9_dii_accumulation', 's10_de_improvement',
-    's11_roce', 's12_eps_cagr', 's14_macro_cycle', 's15_rs_12m', 's_fii_trend', 's_dii_trend'
+    's11_roce', 's12_eps_cagr', 's14_macro_cycle', 's15_rs_12m'
 ]
 
 prices_df['date'] = pd.to_datetime(prices_df['date'])
@@ -101,8 +101,7 @@ def passes_screen1(symbol, rebal_date):
     f3 = get_fin(symbol, yr-3)
 
     if not f0['roe'] or f0['roe'] <= 20: return False
-    if symbol not in financial_symbols:
-        if not f0['opm'] or f0['opm'] <= 10: return False
+    if not f0['opm'] or f0['opm'] <= 10: return False
     if symbol not in financial_symbols:
         if f0['de'] is None or f0['de'] >= 0.9: return False
     if symbol not in financial_symbols:
