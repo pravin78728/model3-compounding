@@ -1,0 +1,35 @@
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Updating prices from 2026-08-30 to 2026-09-04...
+Rows to insert: 2000
+Done. New rows inserted: 100
+Run completed at: 2026-09-04 16:31:12
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+
+1 Failed download:
+['TITAN.NS']: TypeError("'NoneType' object is not subscriptable")
+Updating prices from 2026-09-27 to 2026-10-02...
+Rows to insert: 1996
+Done. New rows inserted: 96
+Run completed at: 2026-10-02 16:30:41
+NIFTY500_IDX: 4 rows added
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Updating prices from 2026-10-04 to 2026-10-09...
+Rows to insert: 2000
+Done. New rows inserted: 100
+Run completed at: 2026-10-09 16:30:43
+NIFTY500_IDX: 4 rows added
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Updating prices from 2026-10-11 to 2026-10-16...
+Rows to insert: 2000
+Traceback (most recent call last):
+  File "/Users/pravinborade/model3-compounding/model3-compounding/update_prices.py", line 43, in <module>
+    conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+  File "/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (35.79.125.133), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (35.79.125.133), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+

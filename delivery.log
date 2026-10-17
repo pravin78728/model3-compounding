@@ -1,0 +1,40 @@
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+No delivery data for 2026-09-04 (status 404)
+Fetched delivery data for 2026-09-03: 2632 stocks
+Updated 2632 rows for 2026-09-03
+Fetched delivery data for 2026-09-02: 2646 stocks
+Updated 2646 rows for 2026-09-02
+Fetched delivery data for 2026-09-01: 2646 stocks
+Updated 500 rows for 2026-09-01
+Done.
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+No delivery data for 2026-10-02 (status 404)
+Fetched delivery data for 2026-10-01: 2662 stocks
+Updated 2662 rows for 2026-10-01
+Fetched delivery data for 2026-09-30: 2669 stocks
+Updated 2669 rows for 2026-09-30
+Fetched delivery data for 2026-09-29: 2671 stocks
+Updated 2671 rows for 2026-09-29
+Done.
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+No delivery data for 2026-10-09 (status 404)
+Fetched delivery data for 2026-10-08: 2681 stocks
+Updated 2681 rows for 2026-10-08
+Fetched delivery data for 2026-10-07: 2678 stocks
+Updated 2678 rows for 2026-10-07
+Fetched delivery data for 2026-10-06: 2679 stocks
+Updated 498 rows for 2026-10-06
+Done.
+/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Traceback (most recent call last):
+  File "/Users/pravinborade/model3-compounding/model3-compounding/fetch_delivery.py", line 38, in <module>
+    conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+  File "/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (52.68.3.1), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (52.68.3.1), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+

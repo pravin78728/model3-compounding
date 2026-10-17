@@ -1,0 +1,13 @@
+[2026-10-09 17:00] Regime: CHOPPY | Nifty500: 21616 | vs 200-DMA: -5.2% | vs 12m: -4.9%
+Email sent: Model 3 Weekly | CHOPPY Regime | 2026-10-09
+Weekly report sent. Regime change: False
+Traceback (most recent call last):
+  File "/Users/pravinborade/model3-compounding/model3-compounding/regime_monitor.py", line 82, in <module>
+    regime, p_now, dma_pct, mom_pct = get_regime()
+  File "/Users/pravinborade/model3-compounding/model3-compounding/regime_monitor.py", line 17, in get_regime
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+  File "/Users/pravinborade/Library/Python/3.9/lib/python/site-packages/psycopg2/__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+psycopg2.OperationalError: connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (52.68.3.1), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+connection to server at "aws-0-ap-northeast-1.pooler.supabase.com" (52.68.3.1), port 6543 failed: FATAL:  (ENOTFOUND) tenant/user postgres.wjorulotskgxxhapdpnf not found
+
