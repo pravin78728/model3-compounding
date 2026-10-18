@@ -46,6 +46,8 @@ LOOKBACK        = 20    # days for OBV high and price high comparison
 SMA_PERIOD      = 50    # days for trend filter
 RSI_PERIOD      = 14    # days for RSI calculation
 RSI_THRESHOLD   = 60    # RSI must be above this
+RSI_MAX         = 80    # RSI must be below this (avoid overbought — quality filter)
+OBV_MIN_PCT     = 5.0   # minimum OBV breakout strength % (quality filter)
 VOL_SHORT       = 20    # days for recent average volume
 VOL_LONG        = 50    # days for baseline average volume
 TRAIL_STOP_PCT  = 0.10  # 10% trailing stop from discovery close
@@ -170,8 +172,8 @@ def check_signal(df, symbol):
     # ── Condition 2: Price close ALSO broke 20-day high ──
     price_breakout = today_close > price_20d_high
 
-    # ── Condition 3: RSI above 60 ──
-    rsi_strong = today_rsi >= RSI_THRESHOLD
+    # ── Condition 3: RSI 60–80 sweet spot (quality filter) ──
+    rsi_strong = RSI_THRESHOLD <= today_rsi < RSI_MAX
 
     # ── Condition 4: 20-day avg volume >= 50-day avg volume ──
     avg_vol_20  = df["volume"].iloc[-VOL_SHORT:].mean()
@@ -182,9 +184,16 @@ def check_signal(df, symbol):
     sma_50     = df["close_price"].iloc[-SMA_PERIOD:].mean()
     above_sma  = today_close > sma_50
 
+    # ── OBV minimum strength check (quality filter) ──
+    obv_strength_early = (
+        (today_obv - obv_prior_high) / abs(obv_prior_high) * 100
+        if obv_prior_high != 0 else 0
+    )
+    obv_strong = obv_strength_early >= OBV_MIN_PCT
+
     # ── Final signal ──
     signal = (obv_breakout and price_breakout and
-              rsi_strong and volume_rising and above_sma)
+              rsi_strong and volume_rising and above_sma and obv_strong)
 
     if not signal:
         return None
@@ -293,8 +302,8 @@ def display_results(df_out):
         print(f"       Vol 20d avg: {row['avg_vol_20d']:,}  |  Vol 50d avg: {row['avg_vol_50d']:,}  |  SMA50: ₹{row['sma_50']}")
 
     print(f"  {'─' * 60}")
-    print("\n  Score guide: OBV strength (40pts) + price breakout (20pts) + RSI (20pts) + 52w wall (15pts) + vol surge (5pts)")
-    print("  Best setup: high score + RSI 60-75 + AT 52W HIGH + strong OBV")
+    print("\n  Score guide: OBV strength (40pts) + price breakout (20pts) + RSI 60-80 (20pts) + 52w wall (15pts) + vol surge (5pts)")
+    print("  Best setup: high score + RSI 65-75 + AT 52W HIGH + strong OBV (RSI capped at 80 — no chasing overbought)")
     print("  Exit rule:  trail stop at 10% below highest close since your discovery date")
     print("=" * 80)
 

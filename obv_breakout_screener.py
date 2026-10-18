@@ -43,6 +43,7 @@ LOOKBACK        = 20   # days for OBV high and price high comparison
 SMA_PERIOD      = 50   # days for trend filter (price must be above this)
 VOL_SHORT       = 20   # days for recent average volume
 VOL_LONG        = 50   # days for baseline average volume
+OBV_MIN_PCT     = 5.0  # minimum OBV breakout strength % (quality filter)
 COIL_SHORT      = 5    # sessions for tight coil check
 COIL_LONG       = 9    # sessions for broader coil check
 COIL_THRESHOLD  = 4.0  # % range considered a coil (high-low / avg_close)
@@ -186,9 +187,16 @@ def check_signal(df, symbol):
     sma_50     = df["close_price"].iloc[-SMA_PERIOD:].mean()
     above_sma  = today_close > sma_50
 
+    # ── OBV strength check (quality filter) ──
+    obv_breakout_pct_early = (
+        (today_obv - obv_prior_high) / abs(obv_prior_high) * 100
+        if obv_prior_high != 0 else 0
+    )
+    obv_strong = obv_breakout_pct_early >= OBV_MIN_PCT
+
     # ── Core signals ──
     raw_signal      = obv_breakout and price_no_breakout
-    filtered_signal = obv_breakout and price_no_breakout and volume_rising and above_sma
+    filtered_signal = obv_breakout and price_no_breakout and volume_rising and above_sma and obv_strong
 
     # ── Resistance Check A: 20-day high proximity ──
     gap_to_20d_high = round((price_20d_high - today_close) / today_close * 100, 2)
