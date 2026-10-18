@@ -41,6 +41,47 @@ if not DATABASE_URL:
 
 engine = create_engine(DATABASE_URL)
 
+# ── Regime Gate ──────────────────────────────────────────────────────────────
+def get_market_regime(engine):
+    """
+    Checks current Nifty500 regime using same logic as regime_monitor.py.
+    BULL:   price > 200-DMA x 1.03 AND price > 12m level x 1.05
+    BEAR:   price < 200-DMA x 0.97 AND price < 12m level x 0.95
+    CHOPPY: everything else
+    """
+    from datetime import timedelta
+    import numpy as np
+    cutoff = (date.today() - timedelta(days=400)).strftime("%Y-%m-%d")
+    query = text("""
+        SELECT date, close_price FROM prices
+        WHERE symbol = 'NIFTY500_IDX'
+        AND date >= :cutoff
+        ORDER BY date DESC
+    """)
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn, params={"cutoff": cutoff})
+    if df.empty:
+        return "UNKNOWN", None, None, None
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    rows     = list(zip(df["date"], df["close_price"]))
+    rd       = rows[0][0]
+    p_now    = rows[0][1]
+    p_200    = [p for d, p in rows if d >= rd - timedelta(days=280)]
+    p_12m_v  = next((p for d, p in rows if d <= rd - timedelta(days=240)), None)
+    dma200   = np.mean(p_200) if p_200 else None
+    if dma200 and p_12m_v:
+        above_dma_pct = round((p_now / dma200 - 1) * 100, 1)
+        momentum_pct  = round((p_now / p_12m_v - 1) * 100, 1)
+        if p_now > dma200 * 1.03 and p_now > p_12m_v * 1.05:
+            regime = "BULL"
+        elif p_now < dma200 * 0.97 and p_now < p_12m_v * 0.95:
+            regime = "BEAR"
+        else:
+            regime = "CHOPPY"
+        return regime, round(p_now, 1), above_dma_pct, momentum_pct
+    return "UNKNOWN", None, None, None
+
+
 # ── Parameters ────────────────────────────────────────────────────────────────
 LOOKBACK        = 20    # days for OBV high and price high comparison
 SMA_PERIOD      = 50    # days for trend filter
@@ -320,6 +361,16 @@ def save_results(df_out):
 def main():
     print("Starting OBV Momentum Screener (Sleeve 2)...")
     print("-" * 40)
+
+    # ── Regime gate ──
+    regime, nifty_price, vs_dma, vs_12m = get_market_regime(engine)
+    print(f"Market regime: {regime} | Nifty500: {nifty_price} | vs 200-DMA: {vs_dma}% | vs 12m: {vs_12m}%")
+    if regime == "BEAR":
+        print("\n⛔  BEAR MARKET REGIME DETECTED — Screener gated off.")
+        print("    Sleeve 2 goes to cash in bear markets (backtest confirmed).")
+        print("    Re-run when regime shifts to BULL or CHOPPY.")
+        return
+
     symbol_data = fetch_data(engine, FETCH_DAYS)
     df_out      = run_screener(symbol_data)
     display_results(df_out)
