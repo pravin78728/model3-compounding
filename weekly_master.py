@@ -317,7 +317,7 @@ def main():
     symbol_data = fetch_data()
     print(f"Loaded {len(symbol_data)} symbols.")
 
-    print("Running Model 1 screeners...")
+    print("Running Model 2 screeners...")
     s1, s2 = run_screeners(symbol_data)
     if regime == "BEAR":
         print("BEAR regime — both sleeves gated. Clearing signals.")
@@ -333,7 +333,15 @@ def main():
     subject = f"{regime_emoji} Weekly Brief | {regime} Regime | {date.today().strftime('%d %b %Y')}"
     body    = build_email(regime, nifty, vs_dma, vs_12m, s1, s2, m3_picks, m3_note)
 
-    send_email(subject, body)
+    # --print flag: show output in terminal instead of / in addition to email
+    print_only = "--print" in sys.argv
+    if print_only:
+        print("\n" + "=" * 55)
+        print(body)
+        print("=" * 55)
+    else:
+        send_email(subject, body)
+
     print("\nDone.")
 
 
