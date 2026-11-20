@@ -114,6 +114,84 @@ def fetch_data(engine, as_of_date):
     return {sym: grp.reset_index(drop=True) for sym, grp in df.groupby("symbol")}
 
 
+# ── Fetch delivery % + 5-day trend for a list of symbols ─────────────────────
+def fetch_delivery(engine, symbols, as_of_date):
+    """
+    Returns dict: symbol -> {
+        today:    delivery % on signal date,
+        avg_20d:  20-day average delivery %,
+        trend_5d: list of last 5 daily delivery % values (oldest first),
+        trend_str: human readable trend e.g. "55% → 48% → 62% → 31% → 19% ↓"
+    }
+    """
+    if not symbols:
+        return {}
+    asof   = as_of_date.strftime("%Y-%m-%d")
+    cutoff = (as_of_date - timedelta(days=40)).strftime("%Y-%m-%d")
+    with get_engine().connect() as conn:
+        df = pd.read_sql(text("""
+            SELECT symbol, date, delivery_pct
+            FROM prices
+            WHERE symbol = ANY(:syms)
+            AND date BETWEEN :cutoff AND :asof
+            AND delivery_pct IS NOT NULL
+            ORDER BY symbol, date ASC
+        """), conn, params={"syms": list(symbols), "cutoff": cutoff, "asof": asof})
+    if df.empty:
+        return {}
+    df["date"]         = pd.to_datetime(df["date"])
+    df["delivery_pct"] = pd.to_numeric(df["delivery_pct"], errors="coerce")
+    result = {}
+    for sym, grp in df.groupby("symbol"):
+        grp      = grp.sort_values("date").dropna(subset=["delivery_pct"])
+        today    = round(float(grp["delivery_pct"].iloc[-1]), 1) if not grp.empty else None
+        avg_20d  = round(float(grp["delivery_pct"].tail(20).mean()), 1) if not grp.empty else None
+        last5    = grp["delivery_pct"].tail(5).tolist()
+        # Trend arrow: compare today vs 5-day avg
+        if len(last5) >= 2:
+            direction = "↑" if last5[-1] > last5[-2] else "↓" if last5[-1] < last5[-2] else "→"
+        else:
+            direction = ""
+        trend_str = " → ".join(f"{v:.0f}%" for v in last5) + f" {direction}"
+        result[sym] = {
+            "today":     today,
+            "avg_20d":   avg_20d,
+            "trend_5d":  last5,
+            "trend_str": trend_str,
+        }
+    return result
+
+
+# ── Fetch FII ownership % from institutional_holdings ────────────────────────
+def fetch_fii_ownership(engine, symbols, as_of_date):
+    """
+    Returns dict: symbol -> (fii_pct, dii_pct, period)
+    Uses most recent quarterly holding before as_of_date.
+    """
+    if not symbols:
+        return {}
+    asof = as_of_date.strftime("%Y-%m-%d")
+    with get_engine().connect() as conn:
+        df = pd.read_sql(text("""
+            SELECT DISTINCT ON (symbol)
+                symbol, period, fii_pct, dii_pct
+            FROM institutional_holdings
+            WHERE symbol = ANY(:syms)
+            AND period <= :asof
+            ORDER BY symbol, period DESC
+        """), conn, params={"syms": list(symbols), "asof": asof})
+    if df.empty:
+        return {}
+    result = {}
+    for _, row in df.iterrows():
+        result[row["symbol"]] = {
+            "fii_pct": round(float(row["fii_pct"]), 1) if row["fii_pct"] else None,
+            "dii_pct": round(float(row["dii_pct"]), 1) if row["dii_pct"] else None,
+            "period":  str(row["period"]),
+        }
+    return result
+
+
 # ── OBV & RSI ─────────────────────────────────────────────────────────────────
 def compute_obv(df):
     c=df["close_price"].values; v=df["volume"].values
@@ -185,12 +263,47 @@ def run_s2_screener(symbol_data, as_of_date, criteria):
                 "sma50":      round(sma50, 2),
             })
 
+    if not signals:
+        return pd.DataFrame(), pd.DataFrame()
+
     df_out = pd.DataFrame(signals).sort_values("obv_%", ascending=False).reset_index(drop=True)
-    return df_out
+    syms   = df_out["symbol"].tolist()
+
+    # Fetch delivery % with 5-day trend
+    engine       = get_engine()
+    delivery_map = fetch_delivery(engine, syms, as_of_date)
+    df_out["delivery_today_%"] = df_out["symbol"].map(
+        lambda s: delivery_map[s]["today"]     if s in delivery_map else None)
+    df_out["delivery_20d_%"]   = df_out["symbol"].map(
+        lambda s: delivery_map[s]["avg_20d"]   if s in delivery_map else None)
+    df_out["delivery_trend"]   = df_out["symbol"].map(
+        lambda s: delivery_map[s]["trend_str"] if s in delivery_map else "N/A")
+
+    # Fetch FII/DII quarterly ownership
+    fii_map = fetch_fii_ownership(engine, syms, as_of_date)
+    df_out["fii_pct"]    = df_out["symbol"].map(
+        lambda s: fii_map[s]["fii_pct"] if s in fii_map else None)
+    df_out["dii_pct"]    = df_out["symbol"].map(
+        lambda s: fii_map[s]["dii_pct"] if s in fii_map else None)
+    df_out["fii_period"] = df_out["symbol"].map(
+        lambda s: fii_map[s]["period"]  if s in fii_map else None)
+
+    # Split: delivery passed (>=40%) vs failed (<40%)
+    DELIVERY_MIN = 40.0
+    passed = df_out[
+        df_out["delivery_today_%"].isna() |
+        (df_out["delivery_today_%"] >= DELIVERY_MIN)
+    ].reset_index(drop=True)
+    failed = df_out[
+        df_out["delivery_today_%"].notna() &
+        (df_out["delivery_today_%"] < DELIVERY_MIN)
+    ].reset_index(drop=True)
+
+    return passed, failed
 
 
 # ── Format output ─────────────────────────────────────────────────────────────
-def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
+def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria, check_date):
     regime_emoji = {"BULL":"🟢","CHOPPY":"🟡","BEAR":"🔴"}.get(regime,"⚪")
     lines = []
     lines.append(f"DAILY SIGNAL CHECK — {check_date.strftime('%A %d %b %Y')}")
@@ -218,7 +331,13 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
         lines.append("="*55)
         return "\n".join(lines), False
 
-    exit_date = check_date + timedelta(days=7)  # approximate 5 trading days
+    # Calculate actual 5 trading days forward (skip weekends)
+    trading_days = 0
+    exit_date = check_date
+    while trading_days < 5:
+        exit_date += timedelta(days=1)
+        if exit_date.weekday() < 5:  # Mon-Fri only
+            trading_days += 1
 
     # Allocation rules from backtest by rank
     # BULL:   Rank1=60%, Rank2=40%, Rank3+=skip
@@ -239,14 +358,16 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
 
     # Show summary table first
     lines.append(f"\n  SIGNAL SUMMARY:")
-    lines.append(f"  {'Rank':<6} {'Symbol':<14} {'Alloc':<8} {'Entry':>8} {'Stop':>8} {'RSI':>6} {'OBV%':>8}")
-    lines.append(f"  {'─'*58}")
+    lines.append(f"  {'Rank':<6} {'Symbol':<14} {'Alloc':<8} {'Entry':>8} {'Stop':>8} {'RSI':>6} {'OBV%':>8} {'Del%':>6}")
+    lines.append(f"  {'─'*64}")
     for rank, (_, row) in enumerate(show_signals.iterrows(), 1):
         alloc_info = alloc_map.get(rank, ("SKIP", "SKIP"))
         alloc_pct  = alloc_info[0]
         if alloc_pct == "SKIP":
             continue
-        lines.append(f"  #{rank:<5} {row['symbol']:<14} {alloc_pct:<8} ₹{row['close']:>7} ₹{row['stop']:>7} {row['rsi']:>6.1f} {row['obv_%']:>7.1f}%")
+        del_today = row.get("delivery_today_%", None)
+        del_str   = f"{del_today:.0f}%" if del_today is not None else "N/A"
+        lines.append(f"  #{rank:<5} {row['symbol']:<14} {alloc_pct:<8} ₹{row['close']:>7} ₹{row['stop']:>7} {row['rsi']:>6.1f} {row['obv_%']:>7.1f}% {del_str:>6}")
 
     # Backtest context
     lines.append(f"\n  BACKTEST CONTEXT ({regime}):")
@@ -277,6 +398,24 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
         lines.append(f"  OBV:        {row['obv_%']}% above 20d high")
         lines.append(f"  Breakout:   {row['break_%']}% above 20d resistance")
         lines.append(f"  52w wall:   {row['gap_52w_%']}% above current price")
+        # Delivery
+        del_today = row.get("delivery_today_%", None)
+        del_20d   = row.get("delivery_20d_%", None)
+        del_trend = row.get("delivery_trend", "N/A")
+        del_today_str = f"{del_today:.0f}%" if del_today is not None else "N/A"
+        del_20d_str   = f"{del_20d:.0f}%"   if del_20d   is not None else "N/A"
+        lines.append(f"  Delivery:   {del_today_str} today | {del_20d_str} 20d avg  ✅ PASS (>=40%)")
+        lines.append(f"  Del trend:  {del_trend} (5-day history)")
+        # FII/DII ownership
+        fii_pct    = row.get("fii_pct", None)
+        dii_pct    = row.get("dii_pct", None)
+        fii_period = row.get("fii_period", "")
+        if fii_pct is not None:
+            fii_flag = " ⚠️  HIGH — sensitive to FII sector rotation" if fii_pct >= 40 else ""
+            lines.append(f"  FII owned:  {fii_pct}% | DII owned: {dii_pct}% (as of {fii_period}){fii_flag}")
+            lines.append(f"  FII note:   {'Check FII sector flow carefully — large FII holder' if fii_pct >= 40 else 'FII ownership moderate — less sensitive to sector rotation'}")
+        else:
+            lines.append(f"  FII owned:  Not available — check Screener shareholding")
         lines.append(f"  Screener:   {screener_url}")
 
         lines.append(f"\n  PRE-TRADE CHECKLIST:")
@@ -284,21 +423,40 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
         lines.append(f"                       Check: Screener quarterly dates or NSE announcements")
         lines.append(f"  [ ] 2. LIQUIDITY   — Avg daily traded value >= ₹10 Cr")
         lines.append(f"                       Check: Screener > avg volume x price")
-        lines.append(f"  [ ] 3. DELIVERY %  — Above 40% on today's breakout")
-        lines.append(f"                       Check: NSE bhavcopy or Trendlyne")
-        lines.append(f"  [ ] 4. PLEDGE      — Promoter pledge below 15%")
+        lines.append(f"  [ ] 3. PLEDGE      — Promoter pledge below 15%")
         lines.append(f"                       Check: Screener > Shareholding > Pledged %")
-        lines.append(f"  [ ] 5. FII FLOW    — FIIs net buying in this sector (last 3 days)")
-        lines.append(f"                       Check: NSE India FII/DII sector data")
-        lines.append(f"  [ ] 6. MACRO       — No RBI/Budget/Fed event in next 5 days")
+        lines.append(f"  [ ] 4. FII FLOW    — FIIs net buying in this sector (last 3 days)")
+        lines.append(f"                       FII ownership % shown above. Check NSE India for daily sector flow")
+        lines.append(f"  [ ] 5. MACRO       — No RBI/Budget/Fed event in next 5 days")
         lines.append(f"                       Check: NSE events or economic calendar")
-        lines.append(f"  [ ] 7. NEWS        — No negative news today")
+        lines.append(f"  [ ] 6. NEWS        — No negative news today")
         lines.append(f"                       Check: Google '{row['symbol']} NSE news today'")
-        lines.append(f"  [ ] 8. GLOBAL      — S&P 500 / Nasdaq not down >1.5% last night")
+        lines.append(f"  [ ] 7. GLOBAL      — S&P 500/Nasdaq not down >1.5% last night")
         lines.append(f"                       Check: Google 'S&P 500 yesterday close'")
         lines.append(f"")
-        lines.append(f"  All 8 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
+        lines.append(f"  All 7 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
         lines.append(f"  Any failed   → SKIP this rank, check next rank signal")
+
+    # Delivery-failed signals section
+    if not signals_fail.empty:
+        lines.append(f"\n{'─'*55}")
+        lines.append(f"  ⚠️  SIGNALS FOUND BUT SKIPPED — LOW DELIVERY %")
+        lines.append(f"  (Met all model criteria but delivery below 40% threshold)")
+        lines.append(f"{'─'*55}")
+        for _, row in signals_fail.iterrows():
+            del_today  = row.get("delivery_today_%", None)
+            del_20d    = row.get("delivery_20d_%", None)
+            del_trend  = row.get("delivery_trend", "N/A")
+            fii_pct    = row.get("fii_pct", None)
+            del_today_str = f"{del_today:.0f}%" if del_today is not None else "N/A"
+            del_20d_str   = f"{del_20d:.0f}%"   if del_20d   is not None else "N/A"
+            fii_str       = f"{fii_pct:.0f}% FII owned" if fii_pct is not None else "FII% unknown"
+            lines.append(f"")
+            lines.append(f"  ✗ {row['symbol']}  |  RSI {row['rsi']} | OBV {row['obv_%']}% | {fii_str}")
+            lines.append(f"    Delivery today: {del_today_str}  ← BELOW 40% threshold → SKIP")
+            lines.append(f"    Delivery 20d avg: {del_20d_str}")
+            lines.append(f"    Delivery 5d trend: {del_trend}")
+            lines.append(f"    Reason: OBV spike driven by speculative intraday volume, not institutional buying")
 
     lines.append(f"\n{'='*55}")
     return "\n".join(lines), True
@@ -362,17 +520,20 @@ def main():
     print(f"{len(symbol_data)} symbols")
 
     print("Scanning for signals...")
-    signals = run_s2_screener(symbol_data, check_date, criteria)
+    signals_pass, signals_fail = run_s2_screener(symbol_data, check_date, criteria)
 
-    output, has_signals = format_output(regime, nifty, vs_dma, vs_12m, signals, CRITERIA, check_date)
+    output, has_signals = format_output(regime, nifty, vs_dma, vs_12m,
+                                        signals_pass, signals_fail, CRITERIA, check_date)
 
     print("\n" + output)
 
     if send_mail:
         regime_emoji = {"BULL":"🟢","CHOPPY":"🟡","BEAR":"🔴"}.get(regime,"⚪")
         if has_signals:
-            top_symbol = signals.iloc[0]["symbol"]
+            top_symbol = signals_pass.iloc[0]["symbol"]
             subject = f"{regime_emoji} SIGNAL: {top_symbol} | {regime} | {check_date.strftime('%d %b %Y')}"
+        elif not signals_fail.empty:
+            subject = f"{regime_emoji} Signals found but delivery failed | {regime} | {check_date.strftime('%d %b %Y')}"
         else:
             subject = f"{regime_emoji} No signals today | {regime} | {check_date.strftime('%d %b %Y')}"
         sent = send_email(subject, output)
@@ -382,16 +543,19 @@ def main():
             print("Email not configured — output printed above only.")
 
     # Save to log
+    top = signals_pass.iloc[0] if not signals_pass.empty else (signals_fail.iloc[0] if not signals_fail.empty else None)
     log_entry = {
-        "date": check_date.isoformat(),
-        "regime": regime,
-        "nifty": nifty,
-        "signals": len(signals) if not signals.empty else 0,
-        "top_pick": signals.iloc[0]["symbol"] if not signals.empty else "",
-        "top_close": signals.iloc[0]["close"] if not signals.empty else "",
-        "top_stop": signals.iloc[0]["stop"] if not signals.empty else "",
-        "top_rsi": signals.iloc[0]["rsi"] if not signals.empty else "",
-        "top_obv": signals.iloc[0]["obv_%"] if not signals.empty else "",
+        "date":       check_date.isoformat(),
+        "regime":     regime,
+        "nifty":      nifty,
+        "signals_pass": len(signals_pass),
+        "signals_fail": len(signals_fail),
+        "top_pick":   top["symbol"] if top is not None else "",
+        "top_close":  top["close"]  if top is not None else "",
+        "top_stop":   top["stop"]   if top is not None else "",
+        "top_rsi":    top["rsi"]    if top is not None else "",
+        "top_obv":    top["obv_%"]  if top is not None else "",
+        "top_del":    top["delivery_today_%"] if top is not None else "",
     }
     log_df = pd.DataFrame([log_entry])
     log_file = "daily_check_log.csv"
