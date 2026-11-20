@@ -208,7 +208,7 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
 
     c = criteria[regime]
     lines.append(f"\nApplying {regime} criteria:")
-    lines.append(f"  RSI {c['rsi_lo']}-{c['rsi_hi']} + OBV >= {c['obv_min']}% + Top 1 pick")
+    lines.append(f"  RSI {c['rsi_lo']}-{c['rsi_hi']} + OBV >= {c['obv_min']}% | Top 2 shown, ranked by OBV strength")
     lines.append(f"  Expected: {c['win_rate']}% win rate, +{c['avg_ret']}% avg return, {c['rr']}:1 R/R")
     lines.append(f"  Stop loss: {c['stop_pct']}% | Hold: 5 trading days")
 
@@ -218,75 +218,89 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, criteria, check_date):
         lines.append("="*55)
         return "\n".join(lines), False
 
-    lines.append(f"\n{'─'*55}")
-    lines.append(f"  {len(signals)} qualifying signal(s) — TOP PICK:")
-    lines.append(f"{'─'*55}")
-
-    # Top pick
-    top = signals.iloc[0]
     exit_date = check_date + timedelta(days=7)  # approximate 5 trading days
-    lines.append(f"\n  ★ {top['symbol']}")
-    lines.append(f"    Entry:      ₹{top['close']} (today's close)")
-    lines.append(f"    Stop loss:  ₹{top['stop']} ({top['stop_pct']}% below entry)")
-    lines.append(f"    Exit:       ~{exit_date.strftime('%d %b %Y')} (5 trading days)")
-    lines.append(f"    RSI:        {top['rsi']} (in {c['rsi_lo']}-{c['rsi_hi']} zone)")
-    lines.append(f"    OBV:        {top['obv_%']}% above 20d high")
-    lines.append(f"    Breakout:   {top['break_%']}% above 20d resistance")
-    lines.append(f"    52w wall:   {top['gap_52w_%']}% above current price")
 
-    if len(signals) > 1:
-        lines.append(f"\n  Other signals (not actioned — top 1 only):")
-        for _, r in signals.iloc[1:4].iterrows():
-            lines.append(f"    {r['symbol']}: RSI {r['rsi']}, OBV {r['obv_%']}%, Stop ₹{r['stop']}")
+    # Allocation rules from backtest by rank
+    # BULL:   Rank1=60%, Rank2=40%, Rank3+=skip
+    # CHOPPY: Rank1=100%, Rank2=100% only if rank1 fails checklist
+    ALLOC = {
+        "BULL":   {1: ("60%", "PRIMARY"),   2: ("40%", "SECONDARY"), 3: ("SKIP", "SKIP")},
+        "CHOPPY": {1: ("100%", "PRIMARY"),  2: ("100%", "IF RANK 1 FAILS CHECKLIST")},
+    }
+    alloc_map = ALLOC.get(regime, {})
+
+    # Cap at rank 2 for BULL, rank 2 for CHOPPY (rank 3+ skip in all regimes)
+    max_rank = 2
+    show_signals = signals.iloc[:max_rank]
 
     lines.append(f"\n{'─'*55}")
-    lines.append(f"  Action: Enter {top['symbol']} at today's close ₹{top['close']}")
-    lines.append(f"  Set stop loss at ₹{top['stop']}")
-    lines.append(f"  Exit at close on {exit_date.strftime('%d %b %Y')} unless stop hit earlier")
-
-    # Pre-trade manual checklist
-    screener_url = f"https://www.screener.in/company/{top['symbol']}/"
-    lines.append(f"\n{'─'*55}")
-    lines.append(f"  PRE-TRADE CHECKLIST — verify before entering")
-    lines.append(f"  Screener: {screener_url}")
+    lines.append(f"  {len(signals)} qualifying signal(s) today | Showing top {len(show_signals)}")
     lines.append(f"{'─'*55}")
-    lines.append(f"")
-    lines.append(f"  [ ] 1. EARNINGS — No results due in next 7 days")
-    lines.append(f"         Check: NSE announcements or Screener quarterly dates")
-    lines.append(f"         → If results due before {exit_date.strftime('%d %b')}: SKIP this trade")
-    lines.append(f"")
-    lines.append(f"  [ ] 2. LIQUIDITY — Avg daily traded value >= ₹10 Cr")
-    lines.append(f"         Check: Screener > Market Cap section > Avg Volume x Price")
-    lines.append(f"         → If below ₹10 Cr/day: SKIP — exit will be difficult")
-    lines.append(f"")
-    lines.append(f"  [ ] 3. DELIVERY % — Above 40% on breakout day")
-    lines.append(f"         Check: NSE bhavcopy or Trendlyne delivery data")
-    lines.append(f"         → If below 40%: move is speculative, not institutional")
-    lines.append(f"")
-    lines.append(f"  [ ] 4. PROMOTER PLEDGE — Below 15%")
-    lines.append(f"         Check: Screener > Shareholding > Pledged %")
-    lines.append(f"         → If above 15%: hidden forced-selling risk, SKIP")
-    lines.append(f"")
-    lines.append(f"  [ ] 5. SECTOR FII FLOW — FIIs net buying in this sector (last 3 days)")
-    lines.append(f"         Check: NSE India > FII/DII data > sector breakdown")
-    lines.append(f"         → If FIIs net selling in sector: wait or skip")
-    lines.append(f"")
-    lines.append(f"  [ ] 6. MACRO EVENTS — No binary event in next 5 trading days")
-    lines.append(f"         Check: NSE events calendar or Economic calendar")
-    lines.append(f"         → RBI policy / Budget / Fed decision in next 5 days: SKIP")
-    lines.append(f"")
-    lines.append(f"  [ ] 7. NEWS CHECK — No negative stock-specific news today")
-    lines.append(f"         Check: Google '{top['symbol']} NSE news today'")
-    lines.append(f"         → SEBI action / management change / contract loss: SKIP")
-    lines.append(f"")
-    lines.append(f"  [ ] 8. GLOBAL MARKETS — S&P 500 / Nasdaq not down >1.5% last night")
-    lines.append(f"         Check: Google 'S&P 500 yesterday close'")
-    lines.append(f"         → If global risk-off: wait for Indian market to stabilise by 11 AM")
-    lines.append(f"")
-    lines.append(f"  All 8 checks passed? → ENTER at today's close ₹{top['close']}")
-    lines.append(f"  Any check failed?    → SKIP or WAIT for next signal")
-    lines.append("="*55)
 
+    # Show summary table first
+    lines.append(f"\n  SIGNAL SUMMARY:")
+    lines.append(f"  {'Rank':<6} {'Symbol':<14} {'Alloc':<8} {'Entry':>8} {'Stop':>8} {'RSI':>6} {'OBV%':>8}")
+    lines.append(f"  {'─'*58}")
+    for rank, (_, row) in enumerate(show_signals.iterrows(), 1):
+        alloc_info = alloc_map.get(rank, ("SKIP", "SKIP"))
+        alloc_pct  = alloc_info[0]
+        if alloc_pct == "SKIP":
+            continue
+        lines.append(f"  #{rank:<5} {row['symbol']:<14} {alloc_pct:<8} ₹{row['close']:>7} ₹{row['stop']:>7} {row['rsi']:>6.1f} {row['obv_%']:>7.1f}%")
+
+    # Backtest context
+    lines.append(f"\n  BACKTEST CONTEXT ({regime}):")
+    if regime == "BULL":
+        lines.append(f"  Rank 1: 63.0% win rate, +3.93% avg → allocate 60% of trade capital")
+        lines.append(f"  Rank 2: 47.8% win rate, +4.12% avg → allocate 40% of trade capital")
+        lines.append(f"  Rank 3+: 28.6% win rate — skip entirely")
+    elif regime == "CHOPPY":
+        lines.append(f"  Rank 1: 67.6% win rate, +4.46% avg → full allocation")
+        lines.append(f"  Rank 2: 50.0% win rate, +4.07% avg → only if Rank 1 fails checklist")
+
+    # Per-stock detail + checklist
+    for rank, (_, row) in enumerate(show_signals.iterrows(), 1):
+        alloc_info = alloc_map.get(rank, ("SKIP", "SKIP"))
+        alloc_pct, alloc_role = alloc_info
+        if alloc_pct == "SKIP":
+            lines.append(f"\n  Rank {rank}+ signals below threshold — skip.")
+            break
+
+        screener_url = f"https://www.screener.in/company/{row['symbol']}/"
+        lines.append(f"\n{'═'*55}")
+        lines.append(f"  RANK {rank} — {row['symbol']} | {alloc_role} | {alloc_pct} of capital")
+        lines.append(f"{'═'*55}")
+        lines.append(f"  Entry:      ₹{row['close']} (today's close)")
+        lines.append(f"  Stop loss:  ₹{row['stop']} ({row['stop_pct']}% below entry)")
+        lines.append(f"  Exit:       ~{exit_date.strftime('%d %b %Y')} (5 trading days)")
+        lines.append(f"  RSI:        {row['rsi']} (in {c['rsi_lo']}-{c['rsi_hi']} zone)")
+        lines.append(f"  OBV:        {row['obv_%']}% above 20d high")
+        lines.append(f"  Breakout:   {row['break_%']}% above 20d resistance")
+        lines.append(f"  52w wall:   {row['gap_52w_%']}% above current price")
+        lines.append(f"  Screener:   {screener_url}")
+
+        lines.append(f"\n  PRE-TRADE CHECKLIST:")
+        lines.append(f"  [ ] 1. EARNINGS    — No results due before {exit_date.strftime('%d %b')}")
+        lines.append(f"                       Check: Screener quarterly dates or NSE announcements")
+        lines.append(f"  [ ] 2. LIQUIDITY   — Avg daily traded value >= ₹10 Cr")
+        lines.append(f"                       Check: Screener > avg volume x price")
+        lines.append(f"  [ ] 3. DELIVERY %  — Above 40% on today's breakout")
+        lines.append(f"                       Check: NSE bhavcopy or Trendlyne")
+        lines.append(f"  [ ] 4. PLEDGE      — Promoter pledge below 15%")
+        lines.append(f"                       Check: Screener > Shareholding > Pledged %")
+        lines.append(f"  [ ] 5. FII FLOW    — FIIs net buying in this sector (last 3 days)")
+        lines.append(f"                       Check: NSE India FII/DII sector data")
+        lines.append(f"  [ ] 6. MACRO       — No RBI/Budget/Fed event in next 5 days")
+        lines.append(f"                       Check: NSE events or economic calendar")
+        lines.append(f"  [ ] 7. NEWS        — No negative news today")
+        lines.append(f"                       Check: Google '{row['symbol']} NSE news today'")
+        lines.append(f"  [ ] 8. GLOBAL      — S&P 500 / Nasdaq not down >1.5% last night")
+        lines.append(f"                       Check: Google 'S&P 500 yesterday close'")
+        lines.append(f"")
+        lines.append(f"  All 8 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
+        lines.append(f"  Any failed   → SKIP this rank, check next rank signal")
+
+    lines.append(f"\n{'='*55}")
     return "\n".join(lines), True
 
 
