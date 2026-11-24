@@ -104,7 +104,7 @@ def main():
 
     # Find dates with missing delivery
     print("Checking for dates with missing delivery data...")
-    missing_dates = get_dates_missing_delivery(conn, lookback_days=30)
+    missing_dates = get_dates_missing_delivery(conn, lookback_days=60)
 
     if not missing_dates:
         print("All delivery data is current. Nothing to fetch.")
