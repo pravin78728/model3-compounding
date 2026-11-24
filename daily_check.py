@@ -251,20 +251,36 @@ def run_s2_screener(symbol_data, as_of_date, criteria):
             # 52w context
             w52       = hist["close_price"].iloc[-252:].max() if len(hist)>=252 else hist["close_price"].max()
             gap_52w   = round((w52-tc)/tc*100, 1)
+            # Volume spike detection
+            today_vol = hist["volume"].iloc[-1]
+            avg_vol   = hist["volume"].iloc[-21:-1].mean()  # 20-day avg excluding today
+            vol_spike = round(today_vol / avg_vol, 1) if avg_vol > 0 else 0
+            # Liquidity — 20-day avg daily traded value in Cr
+            # = avg(volume × close_price) / 1,00,00,000
+            hist["traded_value"] = hist["close_price"] * hist["volume"]
+            avg_traded_cr = round(
+                hist["traded_value"].iloc[-21:-1].mean() / 1e7, 2
+            ) if len(hist) >= 21 else round(
+                hist["traded_value"].mean() / 1e7, 2
+            )
             signals.append({
-                "symbol":     symbol,
-                "close":      round(tc, 2),
-                "rsi":        round(tr, 1),
-                "obv_%":      obv_pct,
-                "break_%":    brk_pct,
-                "stop":       stop,
-                "stop_pct":   stop_pct,
-                "gap_52w_%":  gap_52w,
-                "sma50":      round(sma50, 2),
+                "symbol":       symbol,
+                "close":        round(tc, 2),
+                "rsi":          round(tr, 1),
+                "obv_%":        obv_pct,
+                "break_%":      brk_pct,
+                "stop":         stop,
+                "stop_pct":     stop_pct,
+                "gap_52w_%":    gap_52w,
+                "sma50":        round(sma50, 2),
+                "vol_spike":    vol_spike,
+                "today_vol":    int(today_vol),
+                "avg_vol_20d":  int(avg_vol),
+                "liquidity_cr": avg_traded_cr,
             })
 
     if not signals:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_out = pd.DataFrame(signals).sort_values("obv_%", ascending=False).reset_index(drop=True)
     syms   = df_out["symbol"].tolist()
@@ -288,22 +304,43 @@ def run_s2_screener(symbol_data, as_of_date, criteria):
     df_out["fii_period"] = df_out["symbol"].map(
         lambda s: fii_map[s]["period"]  if s in fii_map else None)
 
-    # Split: delivery passed (>=40%) vs failed (<40%)
-    DELIVERY_MIN = 40.0
-    passed = df_out[
-        df_out["delivery_today_%"].isna() |
-        (df_out["delivery_today_%"] >= DELIVERY_MIN)
-    ].reset_index(drop=True)
-    failed = df_out[
-        df_out["delivery_today_%"].notna() &
-        (df_out["delivery_today_%"] < DELIVERY_MIN)
-    ].reset_index(drop=True)
+    DELIVERY_MIN  = 40.0
+    VOL_SPIKE_MAX = 5.0
+    LIQUIDITY_MIN = 10.0   # minimum ₹10 Cr avg daily traded value
 
-    return passed, failed
+    # Flags
+    df_out["vol_spike_flag"]    = df_out["vol_spike"] >= VOL_SPIKE_MAX
+    df_out["liquidity_fail"]    = df_out["liquidity_cr"] < LIQUIDITY_MIN
+
+    # Split into 4 buckets:
+    # passed:        delivery >= 40% AND no vol spike AND liquidity >= 10 Cr
+    # warned:        delivery NULL OR vol spike (but delivery not < 40% and liquidity ok)
+    # liq_failed:    liquidity < 10 Cr (regardless of delivery)
+    # del_failed:    delivery < 40%
+    del_ok        = df_out["delivery_today_%"].notna() & (df_out["delivery_today_%"] >= DELIVERY_MIN)
+    del_fail      = df_out["delivery_today_%"].notna() & (df_out["delivery_today_%"] < DELIVERY_MIN)
+    del_null      = df_out["delivery_today_%"].isna()
+    vol_spike_f   = df_out["vol_spike_flag"]
+    liq_fail      = df_out["liquidity_fail"]
+
+    # Liquidity fail takes priority over other buckets
+    liq_failed = df_out[liq_fail].reset_index(drop=True)
+    remaining  = df_out[~liq_fail]
+
+    del_ok_r   = remaining["delivery_today_%"].notna() & (remaining["delivery_today_%"] >= DELIVERY_MIN)
+    del_fail_r = remaining["delivery_today_%"].notna() & (remaining["delivery_today_%"] < DELIVERY_MIN)
+    del_null_r = remaining["delivery_today_%"].isna()
+    vol_spike_r = remaining["vol_spike_flag"]
+
+    passed = remaining[del_ok_r & ~vol_spike_r].reset_index(drop=True)
+    warned = remaining[(del_null_r | vol_spike_r) & ~del_fail_r].reset_index(drop=True)
+    failed = remaining[del_fail_r].reset_index(drop=True)
+
+    return passed, warned, failed, liq_failed
 
 
 # ── Format output ─────────────────────────────────────────────────────────────
-def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria, check_date):
+def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_warn, signals_fail, signals_liq, criteria, check_date):
     regime_emoji = {"BULL":"🟢","CHOPPY":"🟡","BEAR":"🔴"}.get(regime,"⚪")
     lines = []
     lines.append(f"DAILY SIGNAL CHECK — {check_date.strftime('%A %d %b %Y')}")
@@ -358,8 +395,8 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria
 
     # Show summary table first
     lines.append(f"\n  SIGNAL SUMMARY:")
-    lines.append(f"  {'Rank':<6} {'Symbol':<14} {'Alloc':<8} {'Entry':>8} {'Stop':>8} {'RSI':>6} {'OBV%':>8} {'Del%':>6}")
-    lines.append(f"  {'─'*64}")
+    lines.append(f"  {'Rank':<6} {'Symbol':<14} {'Alloc':<8} {'Entry':>8} {'Stop':>8} {'RSI':>6} {'OBV%':>8} {'Del%':>6} {'Liq(Cr)':>9}")
+    lines.append(f"  {'─'*73}")
     for rank, (_, row) in enumerate(show_signals.iterrows(), 1):
         alloc_info = alloc_map.get(rank, ("SKIP", "SKIP"))
         alloc_pct  = alloc_info[0]
@@ -367,7 +404,8 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria
             continue
         del_today = row.get("delivery_today_%", None)
         del_str   = f"{del_today:.0f}%" if del_today is not None else "N/A"
-        lines.append(f"  #{rank:<5} {row['symbol']:<14} {alloc_pct:<8} ₹{row['close']:>7} ₹{row['stop']:>7} {row['rsi']:>6.1f} {row['obv_%']:>7.1f}% {del_str:>6}")
+        liq_cr    = row.get("liquidity_cr", 0)
+        lines.append(f"  #{rank:<5} {row['symbol']:<14} {alloc_pct:<8} ₹{row['close']:>7} ₹{row['stop']:>7} {row['rsi']:>6.1f} {row['obv_%']:>7.1f}% {del_str:>6} ₹{liq_cr:>7.1f}Cr")
 
     # Backtest context
     lines.append(f"\n  BACKTEST CONTEXT ({regime}):")
@@ -404,8 +442,17 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria
         del_trend = row.get("delivery_trend", "N/A")
         del_today_str = f"{del_today:.0f}%" if del_today is not None else "N/A"
         del_20d_str   = f"{del_20d:.0f}%"   if del_20d   is not None else "N/A"
+        liq_cr = row.get("liquidity_cr", 0)
+        lines.append(f"  Liquidity:  ₹{liq_cr:.1f} Cr avg daily traded value  ✅ PASS (>=₹10 Cr)")
         lines.append(f"  Delivery:   {del_today_str} today | {del_20d_str} 20d avg  ✅ PASS (>=40%)")
         lines.append(f"  Del trend:  {del_trend} (5-day history)")
+        vol_spike = row.get("vol_spike", 0)
+        avg_vol   = row.get("avg_vol_20d", 0)
+        today_vol = row.get("today_vol", 0)
+        if vol_spike and vol_spike >= 5:
+            lines.append(f"  Volume:     {today_vol:,} today | {avg_vol:,} 20d avg | {vol_spike}x spike ⚠️")
+        else:
+            lines.append(f"  Volume:     {today_vol:,} today | {avg_vol:,} 20d avg | {vol_spike}x (normal)")
         # FII/DII ownership
         fii_pct    = row.get("fii_pct", None)
         dii_pct    = row.get("dii_pct", None)
@@ -421,21 +468,62 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_fail, criteria
         lines.append(f"\n  PRE-TRADE CHECKLIST:")
         lines.append(f"  [ ] 1. EARNINGS    — No results due before {exit_date.strftime('%d %b')}")
         lines.append(f"                       Check: Screener quarterly dates or NSE announcements")
-        lines.append(f"  [ ] 2. LIQUIDITY   — Avg daily traded value >= ₹10 Cr")
-        lines.append(f"                       Check: Screener > avg volume x price")
-        lines.append(f"  [ ] 3. PLEDGE      — Promoter pledge below 15%")
+        lines.append(f"  [ ] 2. PLEDGE      — Promoter pledge below 15%")
         lines.append(f"                       Check: Screener > Shareholding > Pledged %")
-        lines.append(f"  [ ] 4. FII FLOW    — FIIs net buying in this sector (last 3 days)")
+        lines.append(f"  [ ] 3. FII FLOW    — FIIs net buying in this sector (last 3 days)")
         lines.append(f"                       FII ownership % shown above. Check NSE India for daily sector flow")
-        lines.append(f"  [ ] 5. MACRO       — No RBI/Budget/Fed event in next 5 days")
+        lines.append(f"  [ ] 4. MACRO       — No RBI/Budget/Fed event in next 5 days")
         lines.append(f"                       Check: NSE events or economic calendar")
-        lines.append(f"  [ ] 6. NEWS        — No negative news today")
+        lines.append(f"  [ ] 5. NEWS        — No negative news today")
         lines.append(f"                       Check: Google '{row['symbol']} NSE news today'")
-        lines.append(f"  [ ] 7. GLOBAL      — S&P 500/Nasdaq not down >1.5% last night")
+        lines.append(f"  [ ] 6. GLOBAL      — S&P 500/Nasdaq not down >1.5% last night")
         lines.append(f"                       Check: Google 'S&P 500 yesterday close'")
         lines.append(f"")
-        lines.append(f"  All 7 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
+        lines.append(f"  All 6 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
         lines.append(f"  Any failed   → SKIP this rank, check next rank signal")
+
+    # Liquidity-failed signals
+    if not signals_liq.empty:
+        lines.append(f"\n{'─'*55}")
+        lines.append(f"  ⛔ SIGNALS BLOCKED — LOW LIQUIDITY")
+        lines.append(f"  (Below ₹10 Cr avg daily traded value — exit risk)")
+        lines.append(f"{'─'*55}")
+        for _, row in signals_liq.iterrows():
+            liq_cr    = row.get("liquidity_cr", 0)
+            del_today = row.get("delivery_today_%", None)
+            del_str   = f"{del_today:.0f}%" if del_today is not None else "N/A"
+            lines.append(f"")
+            lines.append(f"  ⛔ {row['symbol']}  |  RSI {row['rsi']} | OBV {row['obv_%']}% | Delivery {del_str}")
+            lines.append(f"     Avg daily traded value: ₹{liq_cr:.2f} Cr  ← BELOW ₹10 Cr threshold")
+            lines.append(f"     Approx daily volume: {row.get('avg_vol_20d',0):,} shares × ₹{row['close']:.0f} = ₹{liq_cr:.1f}Cr")
+            lines.append(f"     Risk: Cannot exit position without moving the price against you")
+
+    # Warned signals — NULL delivery or volume spike
+    if not signals_warn.empty:
+        lines.append(f"\n{'─'*55}")
+        lines.append(f"  ⚠️  SIGNALS REQUIRING EXTRA CAUTION")
+        lines.append(f"  (Passed model criteria but delivery unconfirmed or volume spike)")
+        lines.append(f"{'─'*55}")
+        for _, row in signals_warn.iterrows():
+            del_today  = row.get("delivery_today_%", None)
+            vol_spike  = row.get("vol_spike", 0)
+            avg_vol    = row.get("avg_vol_20d", 0)
+            today_vol  = row.get("today_vol", 0)
+            del_trend  = row.get("delivery_trend", "N/A")
+            fii_pct    = row.get("fii_pct", None)
+            fii_str    = f"{fii_pct:.0f}% FII owned" if fii_pct is not None else "FII% unknown"
+            lines.append(f"")
+            lines.append(f"  ⚠ {row['symbol']}  |  RSI {row['rsi']} | OBV {row['obv_%']}% | {fii_str}")
+            if del_today is None:
+                lines.append(f"    Delivery today: NOT YET AVAILABLE — NSE delivery data delayed")
+                lines.append(f"    Delivery 20d avg: {row.get('delivery_20d_%', 'N/A')}%")
+                lines.append(f"    Delivery trend:  {del_trend}")
+                lines.append(f"    Action: CHECK delivery on NSE/Trendlyne before entering")
+                lines.append(f"             If delivery < 40% → SKIP")
+            if vol_spike and vol_spike >= 5:
+                lines.append(f"    Volume spike:   {today_vol:,} today vs {avg_vol:,} avg = {vol_spike}x normal volume")
+                lines.append(f"    Action: VERIFY — extreme volume spike may indicate news/event")
+                lines.append(f"             Check news before entering. If no fundamental reason → SKIP")
 
     # Delivery-failed signals section
     if not signals_fail.empty:
@@ -520,10 +608,10 @@ def main():
     print(f"{len(symbol_data)} symbols")
 
     print("Scanning for signals...")
-    signals_pass, signals_fail = run_s2_screener(symbol_data, check_date, criteria)
+    signals_pass, signals_warn, signals_fail, signals_liq = run_s2_screener(symbol_data, check_date, criteria)
 
     output, has_signals = format_output(regime, nifty, vs_dma, vs_12m,
-                                        signals_pass, signals_fail, CRITERIA, check_date)
+                                        signals_pass, signals_warn, signals_fail, signals_liq, CRITERIA, check_date)
 
     print("\n" + output)
 
@@ -532,8 +620,10 @@ def main():
         if has_signals:
             top_symbol = signals_pass.iloc[0]["symbol"]
             subject = f"{regime_emoji} SIGNAL: {top_symbol} | {regime} | {check_date.strftime('%d %b %Y')}"
-        elif not signals_fail.empty:
-            subject = f"{regime_emoji} Signals found but delivery failed | {regime} | {check_date.strftime('%d %b %Y')}"
+        elif not signals_warn.empty:
+            subject = f"{regime_emoji} ⚠️ Signals need verification | {regime} | {check_date.strftime('%d %b %Y')}"
+        elif not signals_liq.empty or not signals_fail.empty:
+            subject = f"{regime_emoji} Signals blocked by filters | {regime} | {check_date.strftime('%d %b %Y')}"
         else:
             subject = f"{regime_emoji} No signals today | {regime} | {check_date.strftime('%d %b %Y')}"
         sent = send_email(subject, output)
@@ -543,13 +633,15 @@ def main():
             print("Email not configured — output printed above only.")
 
     # Save to log
-    top = signals_pass.iloc[0] if not signals_pass.empty else (signals_fail.iloc[0] if not signals_fail.empty else None)
+    top = signals_pass.iloc[0] if not signals_pass.empty else (signals_warn.iloc[0] if not signals_warn.empty else (signals_fail.iloc[0] if not signals_fail.empty else None))
     log_entry = {
         "date":       check_date.isoformat(),
         "regime":     regime,
         "nifty":      nifty,
         "signals_pass": len(signals_pass),
+        "signals_warn": len(signals_warn),
         "signals_fail": len(signals_fail),
+        "signals_liq":  len(signals_liq),
         "top_pick":   top["symbol"] if top is not None else "",
         "top_close":  top["close"]  if top is not None else "",
         "top_stop":   top["stop"]   if top is not None else "",
