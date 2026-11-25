@@ -368,13 +368,22 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_warn, signals_
         lines.append("="*55)
         return "\n".join(lines), False
 
-    # Calculate actual 5 trading days forward (skip weekends)
+    # Entry is Monday close (next Monday after signal day)
+    # Signal fires any day — entry is always next Monday
+    days_to_monday = (7 - check_date.weekday()) % 7
+    if days_to_monday == 0:
+        days_to_monday = 7  # if today is Monday, next Monday
+    entry_date = check_date + timedelta(days=days_to_monday)
+
+    # Exit is 5 trading days from Monday entry
     trading_days = 0
-    exit_date = check_date
+    exit_date = entry_date
     while trading_days < 5:
         exit_date += timedelta(days=1)
-        if exit_date.weekday() < 5:  # Mon-Fri only
+        if exit_date.weekday() < 5:
             trading_days += 1
+
+    lines.append(f"  Entry: Monday {entry_date.strftime('%d %b')} during market hours | Exit: ~{exit_date.strftime('%d %b')}")
 
     # Allocation rules from backtest by rank
     # BULL:   Rank1=60%, Rank2=40%, Rank3+=skip
@@ -429,9 +438,10 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_warn, signals_
         lines.append(f"\n{'═'*55}")
         lines.append(f"  RANK {rank} — {row['symbol']} | {alloc_role} | {alloc_pct} of capital")
         lines.append(f"{'═'*55}")
-        lines.append(f"  Entry:      ₹{row['close']} (today's close)")
-        lines.append(f"  Stop loss:  ₹{row['stop']} ({row['stop_pct']}% below entry)")
-        lines.append(f"  Exit:       ~{exit_date.strftime('%d %b %Y')} (5 trading days)")
+        lines.append(f"  Signal:     ₹{row['close']} (Friday/today's close — reference price)")
+        lines.append(f"  Entry:      Monday {entry_date.strftime('%d %b')} — enter during the day")
+        lines.append(f"  Stop loss:  {row['stop_pct']}% below your actual entry price")
+        lines.append(f"  Exit:       ~{exit_date.strftime('%d %b %Y')} (5 trading days from Monday entry)")
         lines.append(f"  RSI:        {row['rsi']} (in {c['rsi_lo']}-{c['rsi_hi']} zone)")
         lines.append(f"  OBV:        {row['obv_%']}% above 20d high")
         lines.append(f"  Breakout:   {row['break_%']}% above 20d resistance")
@@ -466,7 +476,7 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_warn, signals_
         lines.append(f"  Screener:   {screener_url}")
 
         lines.append(f"\n  PRE-TRADE CHECKLIST:")
-        lines.append(f"  [ ] 1. EARNINGS    — No results due before {exit_date.strftime('%d %b')}")
+        lines.append(f"  [ ] 1. EARNINGS    — No results due between {entry_date.strftime('%d %b')} and {exit_date.strftime('%d %b')}")
         lines.append(f"                       Check: Screener quarterly dates or NSE announcements")
         lines.append(f"  [ ] 2. PLEDGE      — Promoter pledge below 15%")
         lines.append(f"                       Check: Screener > Shareholding > Pledged %")
@@ -479,7 +489,9 @@ def format_output(regime, nifty, vs_dma, vs_12m, signals, signals_warn, signals_
         lines.append(f"  [ ] 6. GLOBAL      — S&P 500/Nasdaq not down >1.5% last night")
         lines.append(f"                       Check: Google 'S&P 500 yesterday close'")
         lines.append(f"")
-        lines.append(f"  All 6 passed → ENTER ₹{row['close']} | Stop ₹{row['stop']} | Exit {exit_date.strftime('%d %b')}")
+        lines.append(f"  All 6 passed → ENTER Monday {entry_date.strftime('%d %b')} during market hours")
+        lines.append(f"  Set stop {row['stop_pct']}% below your actual entry price")
+        lines.append(f"  Exit: ~{exit_date.strftime('%d %b')} (5 trading days from Monday)")
         lines.append(f"  Any failed   → SKIP this rank, check next rank signal")
 
     # Liquidity-failed signals
